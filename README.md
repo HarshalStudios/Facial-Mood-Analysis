@@ -63,15 +63,18 @@ VITE_API_URL=http://localhost:8000
 
 ---
 
-## Production Build
+## Production Build & Deployment
 
-To build the React frontend for production:
+To install dependencies and build the React frontend for production:
 
 ```bash
+npm ci
 npm run build
 ```
 
-To start the production server (hosting both frontend and proxying API requests to FastAPI):
+The compiled static assets are generated in `dist/`.
+
+To start the production server:
 
 ```bash
 npm start
