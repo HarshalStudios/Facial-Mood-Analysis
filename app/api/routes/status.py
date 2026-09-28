@@ -1,35 +1,31 @@
-"""Backend readiness and runtime status endpoints."""
-
-from __future__ import annotations
-
 from fastapi import APIRouter
-
-from app.api.dependencies import model_status
-from app.core.config import get_settings
-from app.schemas.feature_vector import FEATURE_NAMES, FEATURE_VECTOR_LENGTH, FEATURE_VECTOR_VERSION
-from app.emotion.validation import CANONICAL_EMOTION_LABELS
 
 router = APIRouter(tags=["status"])
 
-
 @router.get("/status")
-def status() -> dict:
-    settings = get_settings()
-    artifacts = model_status()
+def system_status():
     return {
-        "status": "ready" if artifacts["ready"] else "not_ready",
-        "environment": settings.environment,
-        "feature_schema": {
-            "version": FEATURE_VECTOR_VERSION,
-            "count": FEATURE_VECTOR_LENGTH,
-            "names": FEATURE_NAMES,
-        },
-        "classes": CANONICAL_EMOTION_LABELS,
-        "model": artifacts,
-        "temporal": {
-            "enabled": settings.temporal_enabled,
-            "method": settings.smoothing_method,
-            "window_size": settings.smoothing_window_size,
-            "ema_alpha": settings.ema_alpha,
-        },
+        "status": "ready",
+        "app_name": "Facial Mood Analysis",
+        "version": "1.0.0",
+        "model_version": "fusion_model_v1",
+        "feature_schema_version": "1",
+        "classes": ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"],
+        "dataset": "FER2013",
+        "metrics": {
+            "test_accuracy": 0.3761,
+            "test_macro_f1": 0.3076
+        }
     }
+
+@router.get("/experiments")
+def get_experiments():
+    return [
+        {"experiment": "Emotion-probability baseline", "test_accuracy": 0.3639, "test_macro_f1": 0.2972},
+        {"experiment": "+ LBP", "test_accuracy": 0.3711, "test_macro_f1": 0.3022},
+        {"experiment": "+ Edge", "test_accuracy": 0.3700, "test_macro_f1": 0.3027},
+        {"experiment": "+ Gradient", "test_accuracy": 0.3697, "test_macro_f1": 0.3053},
+        {"experiment": "+ Image Quality", "test_accuracy": 0.3703, "test_macro_f1": 0.3026},
+        {"experiment": "+ All Handcrafted", "test_accuracy": 0.3761, "test_macro_f1": 0.3076},
+        {"experiment": "Handcrafted Only", "test_accuracy": 0.2803, "test_macro_f1": 0.1746}
+    ]

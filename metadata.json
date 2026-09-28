@@ -1,0 +1,10 @@
+{
+  "name": "Facial Mood Analysis",
+  "description": "Multi-Representation Based Real-Time Facial Mood Analysis System using RGB camera, FER2013 dataset, 22D feature extraction, and Logistic Regression fusion models.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
