@@ -7,6 +7,8 @@ interface HistoryItem {
   confidence: number;
   frame_id: number;
   frame_hash?: string;
+  session_frames?: number;
+  session_duration_sec?: number;
 }
 
 export const History: React.FC = () => {
@@ -93,11 +95,15 @@ export const History: React.FC = () => {
                   <div>
                     <div className="flex items-center gap-2">
                       <h4 className="text-sm font-bold text-white capitalize">{item.emotion}</h4>
-                      {item.frame_hash && (
+                      {item.session_frames ? (
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded">
+                          Live Session: {item.session_frames} frames ({item.session_duration_sec ?? 1}s)
+                        </span>
+                      ) : item.frame_hash ? (
                         <span className="text-[10px] font-mono px-1.5 py-0.2 bg-slate-800 text-slate-400 rounded">
                           hash:{item.frame_hash}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     <span className="text-[10px] font-mono text-slate-400">{new Date(item.timestamp).toLocaleString()}</span>
                   </div>

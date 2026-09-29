@@ -576,13 +576,24 @@ app.post('/api/predict/temporal/reset', (req, res) => {
   res.json({ status: "reset", history_length: 0 });
 });
 
-// Serve static frontend files and SPA fallback
-app.use(express.static(path.join(__dirname, 'dist')));
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+  }
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`[AI Studio] Full-Stack Server running on http://0.0.0.0:${PORT}`);
+  });
+}
 
-app.listen(Number(PORT), '0.0.0.0', () => {
-  console.log(`[AI Studio] Full-Stack Server running on http://0.0.0.0:${PORT}`);
-});
+startServer();

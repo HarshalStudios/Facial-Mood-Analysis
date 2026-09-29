@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Camera, Upload, Play, Square, RefreshCw, AlertCircle, CheckCircle2, Sliders, Eye } from 'lucide-react';
+import { resetTemporalEngine } from '../services/api';
 
 interface PredictionData {
   frame_id: number;
@@ -21,16 +22,19 @@ interface PredictionData {
 
 export const WebcamAnalyzer: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isLiveAnalyzing, setIsLiveAnalyzing] = useState(false);
+  const isLiveAnalyzingRef = useRef(false);
+  const isProcessingRef = useRef(false);
+  const loopTimeoutRef = useRef<any>(null);
+
   const [prediction, setPrediction] = useState<PredictionData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'webcam' | 'upload'>('webcam');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [autoPoll, setAutoPoll] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const timerRef = useRef<any>(null);
 
   const startWebcam = async () => {
     setError(null);
@@ -48,37 +52,37 @@ export const WebcamAnalyzer: React.FC = () => {
   };
 
   const stopWebcam = () => {
+    if (isLiveAnalyzingRef.current) {
+      stopLiveAnalysis();
+    }
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
     setIsStreaming(false);
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      setAutoPoll(false);
-    }
   };
 
-  const captureAndPredict = async () => {
+  const performPredictionStep = async () => {
     if (!videoRef.current && !selectedImage) return;
-    setLoading(true);
+
+    let base64Data = '';
+    if (mode === 'webcam' && videoRef.current && videoRef.current.readyState >= 2) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        base64Data = canvas.toDataURL('image/jpeg', 0.82);
+      }
+    } else if (selectedImage) {
+      base64Data = selectedImage;
+    }
+
+    if (!base64Data) return;
 
     try {
-      let base64Data = '';
-      if (mode === 'webcam' && videoRef.current) {
-        const canvas = document.createElement('canvas');
-        canvas.width = videoRef.current.videoWidth || 640;
-        canvas.height = videoRef.current.videoHeight || 480;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-          base64Data = canvas.toDataURL('image/jpeg', 0.85);
-        }
-      } else if (selectedImage) {
-        base64Data = selectedImage;
-      }
-
       const res = await fetch('/api/predict/temporal/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -95,23 +99,61 @@ export const WebcamAnalyzer: React.FC = () => {
       });
     } catch (err: any) {
       setError(err.message || 'Error communicating with prediction backend');
-    } finally {
-      setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (autoPoll && isStreaming) {
-      timerRef.current = setInterval(() => {
-        captureAndPredict();
-      }, 1500);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+  const runPredictionLoop = useCallback(async () => {
+    if (!isLiveAnalyzingRef.current) return;
+    if (isProcessingRef.current) {
+      loopTimeoutRef.current = setTimeout(runPredictionLoop, 60);
+      return;
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [autoPoll, isStreaming]);
+
+    isProcessingRef.current = true;
+    try {
+      await performPredictionStep();
+    } finally {
+      isProcessingRef.current = false;
+      if (isLiveAnalyzingRef.current) {
+        loopTimeoutRef.current = setTimeout(runPredictionLoop, 380);
+      }
+    }
+  }, [mode, selectedImage]);
+
+  const startLiveAnalysis = async () => {
+    setError(null);
+    if (mode === 'webcam' && !isStreaming) {
+      await startWebcam();
+    }
+    try {
+      await resetTemporalEngine();
+    } catch (e) {}
+
+    isLiveAnalyzingRef.current = true;
+    setIsLiveAnalyzing(true);
+    runPredictionLoop();
+  };
+
+  const stopLiveAnalysis = async () => {
+    isLiveAnalyzingRef.current = false;
+    setIsLiveAnalyzing(false);
+    if (loopTimeoutRef.current) {
+      clearTimeout(loopTimeoutRef.current);
+      loopTimeoutRef.current = null;
+    }
+    isProcessingRef.current = false;
+    try {
+      await resetTemporalEngine();
+    } catch (e) {}
+  };
+
+  const toggleLiveAnalysis = () => {
+    if (isLiveAnalyzing) {
+      stopLiveAnalysis();
+    } else {
+      startLiveAnalysis();
+    }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -213,32 +255,28 @@ export const WebcamAnalyzer: React.FC = () => {
         <div className="mt-4 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-2">
             {mode === 'webcam' && isStreaming && (
-              <>
-                <button
-                  onClick={stopWebcam}
-                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5"
-                >
-                  <Square className="w-3.5 h-3.5" /> Stop Stream
-                </button>
-                <button
-                  onClick={() => setAutoPoll(!autoPoll)}
-                  className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5 ${
-                    autoPoll ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                  }`}
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${autoPoll ? 'animate-spin' : ''}`} />
-                  {autoPoll ? 'Auto-Polling Active' : 'Enable Auto-Poll'}
-                </button>
-              </>
+              <button
+                onClick={stopWebcam}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5"
+              >
+                <Square className="w-3.5 h-3.5" /> Stop Stream
+              </button>
             )}
             {(mode === 'upload' || (mode === 'webcam' && isStreaming)) && (
               <button
-                onClick={captureAndPredict}
-                disabled={loading}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
+                onClick={toggleLiveAnalysis}
+                className={`px-4 py-2 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5 shadow-sm ${
+                  isLiveAnalyzing ? 'bg-rose-600 hover:bg-rose-700' : 'bg-cyan-600 hover:bg-cyan-700'
+                }`}
               >
-                <Eye className="w-3.5 h-3.5" /> {loading ? 'Analyzing...' : 'Run Single Frame Prediction'}
+                {isLiveAnalyzing ? <Square className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                {isLiveAnalyzing ? 'Stop Live Analysis' : 'Start Live Analysis'}
               </button>
+            )}
+            {isLiveAnalyzing && (
+              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-mono font-bold rounded-md flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> LIVE
+              </span>
             )}
           </div>
 
