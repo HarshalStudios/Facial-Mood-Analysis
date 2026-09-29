@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env.VITE_API_URL || '') + '/api';
+const API_BASE = '/api';
 
 export async function checkHealth() {
   const res = await fetch(`${API_BASE}/health`);
@@ -28,7 +28,7 @@ export async function predictImage(base64Image: string) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Prediction failed');
+    throw new Error(err.detail || err.error || err.message || `Prediction failed (${res.status} ${res.statusText})`);
   }
   return res.json();
 }
@@ -41,7 +41,7 @@ export async function predictTemporalImage(base64Image: string) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Temporal prediction failed');
+    throw new Error(err.detail || err.error || err.message || `Temporal prediction failed (${res.status} ${res.statusText})`);
   }
   return res.json();
 }
