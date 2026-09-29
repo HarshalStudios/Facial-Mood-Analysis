@@ -4,9 +4,15 @@ import {
   RotateCcw, Sliders, CheckCircle2, ChevronDown, 
   Layers, Cpu, BarChart3, RefreshCw, Zap, Shield, Sparkles,
   Maximize2, Minimize2, Grid, Gauge, Heart, Smile, Frown, Meh,
-  Play, Square, Radio
+  Play, Square, Radio, Scan, Crosshair
 } from 'lucide-react';
 import { predictImage, predictTemporalImage, resetTemporalEngine } from '../services/api';
+import { 
+  extractFacialGeometry, 
+  drawLandmarkWireframe, 
+  resetFacialGeometryState, 
+  FacialAnalysisResult 
+} from '../services/facialGeometry';
 
 interface QualityMetrics {
   brightness: number;
@@ -25,6 +31,17 @@ export const Analyze: React.FC = () => {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [isFacingUser, setIsFacingUser] = useState(true);
+
+  // Facial Geometry & Landmark Localization State (Non-Identity Recognition)
+  const [geometryResult, setGeometryResult] = useState<FacialAnalysisResult | null>(null);
+  const [showLandmarks, setShowLandmarks] = useState<boolean>(true);
+  const showLandmarksRef = useRef<boolean>(true);
+  useEffect(() => {
+    showLandmarksRef.current = showLandmarks;
+  }, [showLandmarks]);
+
+  const landmarksCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fsLandmarksCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const [isLiveAnalyzing, setIsLiveAnalyzing] = useState(false);
   const isLiveAnalyzingRef = useRef(false);
@@ -153,6 +170,16 @@ export const Analyze: React.FC = () => {
       fullScreenVideoRef.current.srcObject = null;
     }
     setCameraState('idle');
+    resetFacialGeometryState();
+    setGeometryResult(null);
+    if (landmarksCanvasRef.current) {
+      const ctx = landmarksCanvasRef.current.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, landmarksCanvasRef.current.width, landmarksCanvasRef.current.height);
+    }
+    if (fsLandmarksCanvasRef.current) {
+      const ctx = fsLandmarksCanvasRef.current.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, fsLandmarksCanvasRef.current.width, fsLandmarksCanvasRef.current.height);
+    }
     if (loopTimeoutRef.current) {
       clearTimeout(loopTimeoutRef.current);
       loopTimeoutRef.current = null;
@@ -205,6 +232,43 @@ export const Analyze: React.FC = () => {
             tempCtx.drawImage(sourceVideo, 0, 0, dispW, dispH);
             const rawImgData = tempCtx.getImageData(0, 0, dispW, dispH);
             const d = rawImgData.data;
+
+            // Auxiliary Facial Geometry & Landmark Extraction (Face localization, NOT identity recognition)
+            try {
+              const geom = extractFacialGeometry(sourceVideo);
+              if (geom) {
+                setGeometryResult(geom);
+                if (showLandmarksRef.current) {
+                  const srcW = sourceVideo.videoWidth || 640;
+                  const srcH = sourceVideo.videoHeight || 480;
+                  if (landmarksCanvasRef.current) {
+                    if (landmarksCanvasRef.current.width !== srcW || landmarksCanvasRef.current.height !== srcH) {
+                      landmarksCanvasRef.current.width = srcW;
+                      landmarksCanvasRef.current.height = srcH;
+                    }
+                    drawLandmarkWireframe(landmarksCanvasRef.current, geom.landmarks);
+                  }
+                  if (fsLandmarksCanvasRef.current) {
+                    if (fsLandmarksCanvasRef.current.width !== srcW || fsLandmarksCanvasRef.current.height !== srcH) {
+                      fsLandmarksCanvasRef.current.width = srcW;
+                      fsLandmarksCanvasRef.current.height = srcH;
+                    }
+                    drawLandmarkWireframe(fsLandmarksCanvasRef.current, geom.landmarks);
+                  }
+                } else {
+                  if (landmarksCanvasRef.current) {
+                    const ctx = landmarksCanvasRef.current.getContext('2d');
+                    if (ctx) ctx.clearRect(0, 0, landmarksCanvasRef.current.width, landmarksCanvasRef.current.height);
+                  }
+                  if (fsLandmarksCanvasRef.current) {
+                    const ctx = fsLandmarksCanvasRef.current.getContext('2d');
+                    if (ctx) ctx.clearRect(0, 0, fsLandmarksCanvasRef.current.width, fsLandmarksCanvasRef.current.height);
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('[Facial Geometry] Error in extraction:', e);
+            }
 
             // Helper to render into multiple canvas targets
             const copyToCanvases = (canvases: (HTMLCanvasElement | null)[], processFn: (ctx: CanvasRenderingContext2D) => void) => {
@@ -769,15 +833,37 @@ export const Analyze: React.FC = () => {
                     muted 
                     className={`w-full h-full object-cover ${cameraState !== 'live' ? 'hidden' : ''}`} 
                   />
+                  <canvas 
+                    ref={landmarksCanvasRef} 
+                    className={`absolute inset-0 w-full h-full pointer-events-none object-cover ${cameraState !== 'live' || !showLandmarks ? 'hidden' : ''}`} 
+                  />
                   
                   {/* HUD Overlays */}
                   {cameraState === 'live' && (
                     <>
-                      <div className="absolute top-4 left-4 px-3 py-1 bg-slate-950/80 backdrop-blur-md rounded-lg border border-slate-700/80 text-[11px] font-mono text-cyan-400 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                        LIVE RGB
+                      <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2 z-10">
+                        <div className="px-3 py-1 bg-slate-950/80 backdrop-blur-md rounded-lg border border-slate-700/80 text-[11px] font-mono text-cyan-400 flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                          LIVE RGB
+                        </div>
+                        <button
+                          onClick={() => setShowLandmarks(!showLandmarks)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all backdrop-blur-md ${
+                            showLandmarks 
+                              ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300 font-bold' 
+                              : 'bg-slate-950/80 border-slate-700/80 text-slate-400'
+                          }`}
+                          title="Toggle facial landmark wireframe overlay"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Mesh: {showLandmarks ? 'ON' : 'OFF'}</span>
+                        </button>
+                        <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-slate-950/80 backdrop-blur-md rounded-lg border border-slate-700/80 text-[10px] font-mono text-slate-300">
+                          <Shield className="w-3 h-3 text-emerald-400" />
+                          Face Localization · No Identity Recog
+                        </div>
                       </div>
-                      <div className="absolute top-4 right-4 px-3 py-1 bg-slate-950/80 backdrop-blur-md rounded-lg border border-slate-700/80 text-[11px] font-mono text-slate-300 flex items-center gap-2">
+                      <div className="absolute top-4 right-4 px-3 py-1 bg-slate-950/80 backdrop-blur-md rounded-lg border border-slate-700/80 text-[11px] font-mono text-slate-300 flex items-center gap-2 z-10">
                         <button 
                           onClick={() => setIsFullScreenMultiview(true)}
                           className="hover:text-cyan-400 flex items-center gap-1"
@@ -787,9 +873,14 @@ export const Analyze: React.FC = () => {
                       </div>
                       <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                         <div className="w-56 h-64 border-2 border-dashed border-cyan-400/40 rounded-3xl relative">
-                          <span className="absolute -top-3 left-4 px-2 py-0.5 bg-slate-900 text-[10px] font-mono text-cyan-400 border border-cyan-500/30 rounded">
-                            Face ROI
+                          <span className="absolute -top-3 left-4 px-2 py-0.5 bg-slate-900 text-[10px] font-mono text-cyan-400 border border-cyan-500/30 rounded flex items-center gap-1">
+                            <Crosshair className="w-2.5 h-2.5" /> Face ROI (Localized)
                           </span>
+                          {geometryResult && (
+                            <span className="absolute -bottom-3 right-4 px-2 py-0.5 bg-slate-900 text-[10px] font-mono text-slate-300 border border-slate-700 rounded">
+                              IOD: {geometryResult.metrics.interocularDistance}px · AR: {geometryResult.metrics.faceAspectRatio}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </>
@@ -982,6 +1073,80 @@ export const Analyze: React.FC = () => {
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Auxiliary Facial Geometry Signals (Continuous Co-occurring Evidence) */}
+              <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase text-cyan-400 tracking-wider font-semibold flex items-center gap-1.5">
+                    <Scan className="w-3.5 h-3.5" /> Auxiliary Geometry Signals
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Non-Overriding</span>
+                </div>
+
+                {geometryResult ? (
+                  <div className="space-y-2 text-xs font-mono bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
+                    {/* Multi-cue Evidence Tags */}
+                    <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                      <div className="p-1.5 bg-slate-950/80 rounded border border-slate-800 flex justify-between">
+                        <span className="text-slate-400">Mouth Corners:</span>
+                        <span className={`font-bold ${
+                          geometryResult.metrics.averageCornerElevation > 0.005 
+                            ? 'text-emerald-400' 
+                            : geometryResult.metrics.averageCornerElevation < -0.005 
+                              ? 'text-rose-400' 
+                              : 'text-slate-300'
+                        }`}>
+                          {geometryResult.metrics.averageCornerElevation > 0.005 
+                            ? '▲ Raised' 
+                            : geometryResult.metrics.averageCornerElevation < -0.005 
+                              ? '▼ Downturned' 
+                              : '— Level'}
+                        </span>
+                      </div>
+                      <div className="p-1.5 bg-slate-950/80 rounded border border-slate-800 flex justify-between">
+                        <span className="text-slate-400">Mouth Open:</span>
+                        <span className={`font-bold ${
+                          geometryResult.evidence.mouthOpenStrength === 'HIGH' ? 'text-amber-400' : 'text-slate-300'
+                        }`}>
+                          {geometryResult.evidence.mouthOpenStrength === 'HIGH' ? 'Open (O-Shape)' : 'Closed/Normal'}
+                        </span>
+                      </div>
+                      <div className="p-1.5 bg-slate-950/80 rounded border border-slate-800 flex justify-between">
+                        <span className="text-slate-400">Eye Aperture:</span>
+                        <span className={`font-bold ${
+                          geometryResult.evidence.eyeOpennessStrength === 'WIDE' 
+                            ? 'text-cyan-400' 
+                            : geometryResult.evidence.eyeOpennessStrength === 'NARROWED' 
+                              ? 'text-amber-400' 
+                              : 'text-slate-300'
+                        }`}>
+                          {geometryResult.evidence.eyeOpennessStrength}
+                        </span>
+                      </div>
+                      <div className="p-1.5 bg-slate-950/80 rounded border border-slate-800 flex justify-between">
+                        <span className="text-slate-400">Brow Tension:</span>
+                        <span className={`font-bold ${
+                          geometryResult.evidence.browFurrowStrength === 'HIGH' ? 'text-rose-400' : 'text-slate-300'
+                        }`}>
+                          {geometryResult.evidence.browFurrowStrength === 'HIGH' ? 'Furrowed' : 'Relaxed'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Synthesis Note */}
+                    <div className="pt-1.5 border-t border-slate-800 text-[10px] text-slate-300 leading-tight">
+                      <span className="text-cyan-400 font-semibold">Evidence: </span>
+                      {geometryResult.evidence.supportingSignalDescription}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-900/40 rounded-xl border border-dashed border-slate-800 text-center">
+                    <span className="text-[11px] font-mono text-slate-500">
+                      Activate camera to stream facial geometry
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1261,6 +1426,276 @@ export const Analyze: React.FC = () => {
       </section>
 
       {/* ======================================================== */}
+      {/* 4.5 AUXILIARY FACIAL GEOMETRY & MULTI-CUE EVIDENCE STREAM */}
+      {/* ======================================================== */}
+      <section className="bg-slate-900/80 backdrop-blur-xl rounded-3xl border border-slate-800 p-6 md:p-8 shadow-2xl space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono uppercase tracking-widest text-cyan-400 font-semibold">
+                Auxiliary Geometric Signals · Non-Overriding
+              </span>
+              <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full text-[10px] font-mono flex items-center gap-1 font-bold">
+                <Shield className="w-3 h-3" /> Face Localization Only · No Identity Recog
+              </span>
+            </div>
+            <h2 className="text-xl font-bold text-white tracking-tight">
+              Facial Geometry, Anthropometric Signals & Multi-Cue Evidence
+            </h2>
+            <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
+              Extracts scale-normalized landmark distances (mouth elevation, eye aperture, brow furrow/elevation). 
+              Crucially, one feature alone never determines an emotion (e.g. mouth opening alone does NOT imply surprise). 
+              Continuous co-occurrence signals provide auxiliary evidence alongside the 22D FER2013 fusion model.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowLandmarks(!showLandmarks)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-bold flex items-center gap-1.5 transition-all ${
+                showLandmarks 
+                  ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300' 
+                  : 'bg-slate-800 border-slate-700 text-slate-400'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Landmark Mesh: {showLandmarks ? 'Visible' : 'Hidden'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          {/* Card 1: Face Localization & Scaling */}
+          <div className="bg-slate-950/70 rounded-2xl border border-slate-800 p-5 space-y-4 flex flex-col justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Crosshair className="w-4 h-4 text-cyan-400" /> Face Localization
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-900 text-cyan-400 border border-cyan-500/30 rounded">
+                  ANATOMICAL
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-normal">
+                Detects spatial coordinates for expression deformation analysis without identity templates.
+              </p>
+            </div>
+
+            <div className="space-y-2 text-xs font-mono">
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Status</span>
+                <span className="text-emerald-400 font-bold">
+                  {cameraState === 'live' ? 'Localized & Tracked' : 'Awaiting Stream'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Interocular Dist (IOD)</span>
+                <span className="text-slate-200 font-bold">
+                  {geometryResult?.metrics.interocularDistance ?? 84} px
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Face Aspect Ratio</span>
+                <span className="text-slate-200 font-bold">
+                  {geometryResult?.metrics.faceAspectRatio ?? 0.84}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="text-slate-500">Biometric Template</span>
+                <span className="text-emerald-400 font-bold">None (Private)</span>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 text-[10px] font-mono text-slate-400">
+              Reference: Scale-invariant bounding box normalization
+            </div>
+          </div>
+
+          {/* Card 2: Mouth & Oral Fissure Geometry */}
+          <div className="bg-slate-950/70 rounded-2xl border border-slate-800 p-5 space-y-4 flex flex-col justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Smile className="w-4 h-4 text-emerald-400" /> Mouth Anthropometry
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-900 text-slate-300 border border-slate-700 rounded">
+                  VALENCE
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-normal">
+                Corner elevation bends upward during smiles, level in neutral, and downward in sadness.
+              </p>
+            </div>
+
+            <div className="space-y-2 text-xs font-mono">
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Corner Elevation</span>
+                <span className={`font-bold ${
+                  (geometryResult?.metrics.averageCornerElevation ?? 0) > 0.005 
+                    ? 'text-emerald-400' 
+                    : (geometryResult?.metrics.averageCornerElevation ?? 0) < -0.005 
+                      ? 'text-rose-400' 
+                      : 'text-slate-200'
+                }`}>
+                  {(geometryResult?.metrics.averageCornerElevation ?? 0.008) > 0 ? '+' : ''}
+                  {((geometryResult?.metrics.averageCornerElevation ?? 0.008) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Aperture (MAR)</span>
+                <span className="text-slate-200 font-bold">
+                  {((geometryResult?.metrics.mouthAspectRatio ?? 0.22) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Curvature Coeff</span>
+                <span className="text-cyan-300 font-bold">
+                  {geometryResult?.metrics.mouthCurvature ?? 0.8}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="text-slate-500">Width / Face Ratio</span>
+                <span className="text-slate-200 font-bold">
+                  {((geometryResult?.metrics.mouthWidth ?? 0.44) * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 text-[10px] font-mono text-slate-400 flex items-center justify-between">
+              <span>Oral Aperture:</span>
+              <span className="text-cyan-300 font-bold">
+                {geometryResult?.evidence.mouthOpenStrength ?? 'NORMAL'}
+              </span>
+            </div>
+          </div>
+
+          {/* Card 3: Ocular & Eyebrow Anthropometry */}
+          <div className="bg-slate-950/70 rounded-2xl border border-slate-800 p-5 space-y-4 flex flex-col justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-sky-400" /> Eyes & Eyebrows
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-900 text-slate-300 border border-slate-700 rounded">
+                  AROUSAL
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-normal">
+                Eye aspect ratio (EAR), eyebrow elevation, and inner-brow furrow gap for tension detection.
+              </p>
+            </div>
+
+            <div className="space-y-2 text-xs font-mono">
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Eye Openness (EAR)</span>
+                <span className="text-slate-200 font-bold">
+                  {((geometryResult?.metrics.averageEyeOpenness ?? 0.28) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Eye Aperture Class</span>
+                <span className="text-cyan-300 font-bold">
+                  {geometryResult?.evidence.eyeOpennessStrength ?? 'NORMAL'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-slate-900">
+                <span className="text-slate-500">Brow Elevation</span>
+                <span className="text-slate-200 font-bold">
+                  {geometryResult?.evidence.eyebrowElevationStrength ?? 'NORMAL'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="text-slate-500">Brow Furrow Gap</span>
+                <span className={`font-bold ${
+                  geometryResult?.evidence.browFurrowStrength === 'HIGH' ? 'text-rose-400' : 'text-slate-200'
+                }`}>
+                  {((geometryResult?.metrics.browFurrowDistance ?? 0.22) * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 text-[10px] font-mono text-slate-400 flex items-center justify-between">
+              <span>Eye Symmetry:</span>
+              <span className="text-slate-200 font-bold">
+                {((geometryResult?.metrics.eyeSymmetry ?? 0.95) * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+
+          {/* Card 4: Multi-Cue Co-Occurrence Evidence */}
+          <div className="bg-slate-950/70 rounded-2xl border border-slate-800 p-5 space-y-4 flex flex-col justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Activity className="w-4 h-4 text-amber-400" /> Multi-Cue Evidence
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 rounded">
+                  CO-OCCURRENCE
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-normal">
+                Mouth open alone ≠ surprise. Requires mouth open + widened eyes + raised brows.
+              </p>
+            </div>
+
+            <div className="space-y-2 text-xs font-mono">
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Smile Evidence:</span>
+                  <span className="text-emerald-400 font-bold">
+                    {((geometryResult?.evidence.smileEvidence ?? 0.12) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-400 transition-all" style={{ width: `${(geometryResult?.evidence.smileEvidence ?? 0.12) * 100}%` }}></div>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Surprise Co-occurrence:</span>
+                  <span className="text-cyan-400 font-bold">
+                    {((geometryResult?.evidence.surpriseEvidence ?? 0.08) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                  <div className="h-full bg-cyan-400 transition-all" style={{ width: `${(geometryResult?.evidence.surpriseEvidence ?? 0.08) * 100}%` }}></div>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Sad Mouth Cues:</span>
+                  <span className="text-rose-400 font-bold">
+                    {((geometryResult?.evidence.sadMouthEvidence ?? 0.06) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                  <div className="h-full bg-rose-400 transition-all" style={{ width: `${(geometryResult?.evidence.sadMouthEvidence ?? 0.06) * 100}%` }}></div>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Brow Furrow (Tension):</span>
+                  <span className="text-amber-400 font-bold">
+                    {((geometryResult?.evidence.browFurrowEvidence ?? 0.09) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-400 transition-all" style={{ width: `${(geometryResult?.evidence.browFurrowEvidence ?? 0.09) * 100}%` }}></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-2 bg-slate-900 rounded-xl text-[10px] font-mono text-cyan-300 truncate">
+              {geometryResult?.evidence.supportingSignalDescription || 'Awaiting live stream...'}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ======================================================== */}
       {/* 5. 22D FEATURE SPACE & ANALYTICS HEATMAP SECTION */}
       {/* ======================================================== */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1506,6 +1941,18 @@ export const Analyze: React.FC = () => {
               </button>
 
               <button
+                onClick={() => setShowLandmarks(!showLandmarks)}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-bold flex items-center gap-1.5 transition-all ${
+                  showLandmarks 
+                    ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300' 
+                    : 'bg-slate-800 border-slate-700 text-slate-400'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Landmarks: {showLandmarks ? 'ON' : 'OFF'}</span>
+              </button>
+
+              <button
                 onClick={() => setIsFullScreenMultiview(false)}
                 className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl border border-slate-700 transition-colors flex items-center gap-1.5"
               >
@@ -1520,7 +1967,7 @@ export const Analyze: React.FC = () => {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col relative">
               <div className="px-3 py-1.5 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between text-[11px] font-mono z-10 shrink-0">
                 <span className="text-cyan-400 font-bold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 01. RGB STREAM
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 01. RGB STREAM + LOCALIZATION
                 </span>
                 <span className="text-slate-400">Direct BGR</span>
               </div>
@@ -1531,6 +1978,10 @@ export const Analyze: React.FC = () => {
                   playsInline 
                   muted 
                   className={`w-full h-full object-cover ${cameraState !== 'live' ? 'hidden' : ''}`} 
+                />
+                <canvas 
+                  ref={fsLandmarksCanvasRef} 
+                  className={`absolute inset-0 w-full h-full pointer-events-none object-cover ${cameraState !== 'live' || !showLandmarks ? 'hidden' : ''}`} 
                 />
                 {cameraState !== 'live' && (
                   <span className="text-xs font-mono text-slate-500">Camera inactive</span>

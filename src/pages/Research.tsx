@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Database, Award, Cpu, Layers, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Database, Award, Cpu, Layers, ShieldAlert, CheckCircle2, Scan } from 'lucide-react';
 
 interface Experiment {
   experiment: string;
@@ -140,6 +140,37 @@ export const Research: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Model Limitations & Transparency */}
+      <div className="bg-slate-900/80 backdrop-blur-xl rounded-3xl border border-slate-800 p-8 space-y-5">
+        <div className="flex items-center gap-2.5 text-cyan-400 font-bold text-base">
+          <Scan className="w-5 h-5" />
+          <span>Auxiliary Facial Geometry Architecture & Privacy Boundaries</span>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-slate-300 leading-relaxed">
+          <div className="space-y-2 bg-slate-950 p-5 rounded-2xl border border-slate-800/80">
+            <h4 className="font-bold text-white text-sm font-mono uppercase tracking-wider text-cyan-300">
+              Face Localization vs Identity Recognition
+            </h4>
+            <p>
+              The system is architected strictly to <strong>detect and localize the facial boundary and anthropometric landmarks</strong> for expression deformation analysis. It <strong>never performs identity recognition</strong>, facial recognition, template matching, or person tracking. All coordinates are scale-normalized by bounding box dimensions and interocular distance (IOD).
+            </p>
+          </div>
+
+          <div className="space-y-2 bg-slate-950 p-5 rounded-2xl border border-slate-800/80">
+            <h4 className="font-bold text-white text-sm font-mono uppercase tracking-wider text-emerald-300">
+              Multi-Cue Co-Occurrence Principles
+            </h4>
+            <p>
+              Geometric signals operate as continuous non-linear evidence rather than hardcoded rules:
+              <br />• <strong>Mouth corners raised/lowered:</strong> Corroborates valence (Happy / Sad).
+              <br />• <strong>Surprise co-occurrence:</strong> Mouth open alone does not imply surprise (can occur during speech). True surprise evidence requires co-occurring mouth opening + widened eye aperture + elevated eyebrows.
+              <br />• <strong>Non-overriding:</strong> The trained ML model predictions remain the canonical classification authority.
+            </p>
+          </div>
         </div>
       </div>
 
